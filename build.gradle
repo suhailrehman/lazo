@@ -26,6 +26,12 @@ dependencies {
 
     // Use JUnit test framework
     testImplementation 'junit:junit:4.12'
+
+    //Apache Arrow framework
+    implementation 'org.apache.arrow:arrow-vector:8.0.0'
+    implementation 'org.apache.arrow:flight-core:8.0.0'
+    implementation 'org.apache.arrow:flight-grpc:8.0.0'
+
 }
 
 // In this section you declare where to find the dependencies of your project
