@@ -1,16 +1,10 @@
 package lazo.arrowserver.flightrpc;
 
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.util.Collections;
-import java.util.List;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-
 import org.apache.arrow.flight.Action;
+import org.apache.arrow.flight.AsyncPutListener;
 import org.apache.arrow.flight.CallStatus;
 import org.apache.arrow.flight.Criteria;
+import org.apache.arrow.flight.FlightClient;
 import org.apache.arrow.flight.FlightDescriptor;
 import org.apache.arrow.flight.FlightEndpoint;
 import org.apache.arrow.flight.FlightInfo;
@@ -23,107 +17,50 @@ import org.apache.arrow.flight.Result;
 import org.apache.arrow.flight.Ticket;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
-import org.apache.arrow.vector.FieldVector;
+import org.apache.arrow.vector.VarCharVector;
 import org.apache.arrow.vector.VectorLoader;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.VectorUnloader;
-import org.apache.arrow.vector.ipc.ArrowStreamReader;
 import org.apache.arrow.vector.ipc.message.ArrowRecordBatch;
+import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
+import org.apache.arrow.vector.types.pojo.FieldType;
 import org.apache.arrow.vector.types.pojo.Schema;
 
-import lazo.index.LazoIndex;
-import lazo.index.LazoIndex.LazoCandidate;
-import lazo.sketch.LazoSketch;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 
-
-public class CookbookProducer extends NoOpFlightProducer {
+class CookbookProducer extends NoOpFlightProducer {
     private final BufferAllocator allocator;
     private final Location location;
     private final ConcurrentHashMap<FlightDescriptor, Dataset> datasets;
-    private final ConcurrentHashMap<String, LazoSketch> hashes;
-    private final LazoIndex index;
-    private final float jcx_threshold;
-
     public CookbookProducer(BufferAllocator allocator, Location location) {
         this.allocator = allocator;
         this.location = location;
         this.datasets = new ConcurrentHashMap<>();
-        this.hashes = new ConcurrentHashMap<>();
-        this.index = new LazoIndex();
-        this.jcx_threshold = 0.5f;
     }
-
-    // generate a hash
     @Override
     public Runnable acceptPut(CallContext context, FlightStream flightStream, StreamListener<PutResult> ackStream) {
-        // List<ArrowRecordBatch> batches = new ArrayList<>();
-        // FlightDescriptor fDescriptor = flightStream.getDescriptor();
-        
-        // Get the schema from the descriptor
-        Schema schema = flightStream.getSchema();
-        List<Field> fields = schema.getFields();
-
-        System.out.println("Indexing Schema: " + schema.toString());
-        System.out.println("Fields: " + fields.toString());
-
-        for (Field field : fields) {
-            if (!hashes.contains(field.getName())) {
-                hashes.put(field.getName(), new LazoSketch());
-            }
-        }
-        
+        List<ArrowRecordBatch> batches = new ArrayList<>();
         return () -> {
             long rows = 0;
-            
+            VectorUnloader unloader;
             while (flightStream.next()) {
-                VectorSchemaRoot root = flightStream.getRoot();
-                VectorUnloader unloader = new VectorUnloader(root);
-
-                // Unload the vector into a list of ArrowRecordBatch
-                try (final ArrowRecordBatch arb = unloader.getRecordBatch()) {
-                    for (int i=0; i < root.getRowCount(); i++){
-                        for (FieldVector fieldVector : root.getFieldVectors()) {
-                            String fieldName = fieldVector.getField().getName();
-                            String fieldContents = fieldVector.getObject(i).toString();
-                            
-                            // Check for Thread Safety Here 
-                            LazoSketch sketch = hashes.get(fieldName);
-                            sketch.update(fieldContents);
-                            hashes.put(fieldName, sketch);
-                        }
-                    }
-                    
-
-
-                    rows += flightStream.getRoot().getRowCount();
-                }
-                
-                /* 
-                // Vector Unloader Based Approach 
-                VectorUnloader unloader = new VectorUnloader(flightStream.getRoot());
-                
+                unloader = new VectorUnloader(flightStream.getRoot());
                 try (final ArrowRecordBatch arb = unloader.getRecordBatch()) {
                     batches.add(arb);
-                    List<ArrowBuf> buffers = arb.getBuffers();
-                    for (ArrowBuf buf : buffers) {
-                        System.out.println("Buffer: "+ buf.toString());                    }
                     rows += flightStream.getRoot().getRowCount();
                 }
-                */
             }
-            
-            //Dataset dataset = new Dataset(batches, flightStream.getSchema(), rows);
-            //datasets.put(flightStream.getDescriptor(), dataset);
-
-            // Update the LazoIndex
-            for (Field field : fields) {
-                index.insert(field.getName(), hashes.get(field.getName()));
-            }
-
-            System.out.println("S1: Server: Indexed "+ rows +" rows");
+            Dataset dataset = new Dataset(batches, flightStream.getSchema(), rows);
+            datasets.put(flightStream.getDescriptor(), dataset);
             ackStream.onCompleted();
-
         };
     }
 
@@ -149,10 +86,10 @@ public class CookbookProducer extends NoOpFlightProducer {
 
     @Override
     public void doAction(CallContext context, Action action, StreamListener<Result> listener) {
-        
+        FlightDescriptor flightDescriptor = FlightDescriptor.path(
+                new String(action.getBody(), StandardCharsets.UTF_8));
         switch (action.getType()) {
             case "DELETE":
-                FlightDescriptor flightDescriptor = FlightDescriptor.path(new String(action.getBody(), StandardCharsets.UTF_8));
                 if (datasets.remove(flightDescriptor) != null) {
                     Result result = new Result("Delete completed".getBytes(StandardCharsets.UTF_8));
                     listener.onNext(result);
@@ -162,37 +99,6 @@ public class CookbookProducer extends NoOpFlightProducer {
                     listener.onNext(result);
                 }
                 listener.onCompleted();
-            case "QUERY":
-                LazoSketch sketch = new LazoSketch();
-                try (ArrowStreamReader reader = new ArrowStreamReader(new ByteArrayInputStream(action.getBody()), allocator)) {
-                    VectorSchemaRoot root = reader.getVectorSchemaRoot();
-                    Schema schema = root.getSchema();
-                    VectorUnloader unloader = new VectorUnloader(root);
-
-                    // Unload the vector into a list of ArrowRecordBatch
-                    try (final ArrowRecordBatch arb = unloader.getRecordBatch()) {
-                        for (int i=0; i < root.getRowCount(); i++){
-                            for (FieldVector fieldVector : root.getFieldVectors()) {
-                                String fieldName = fieldVector.getField().getName();
-                                String fieldContents = fieldVector.getObject(i).toString();
-                                
-                                // Check for Thread Safety Here 
-                                // 
-                                sketch.update(fieldContents);
-                            }
-                        }
-                        
-                    }
-                
-                Set<LazoCandidate> indexResult = index.queryContainment(sketch, jcx_threshold);
-                Result result = new Result(indexResult.toString().getBytes(StandardCharsets.UTF_8));
-                listener.onNext(result);
-                  
-                }
-                catch (IOException e) {
-                    Result result = new Result(("Query not completed. Reason: " + e.getMessage()).getBytes(StandardCharsets.UTF_8));
-                    listener.onNext(result);
-                }
         }
     }
 
@@ -213,29 +119,5 @@ public class CookbookProducer extends NoOpFlightProducer {
     public void listFlights(CallContext context, Criteria criteria, StreamListener<FlightInfo> listener) {
         datasets.forEach((k, v) -> { listener.onNext(getFlightInfo(null, k)); });
         listener.onCompleted();
-    }
-
-   
-
-    public static void main(String[] args) {
-        Location location = Location.forGrpcInsecure("0.0.0.0", 33333);
-        try (BufferAllocator allocator = new RootAllocator()){
-            // Server
-            try(FlightServer flightServer = FlightServer.builder(allocator, location,
-                    new CookbookProducer(allocator, location)).build()) {
-                try {
-                    flightServer.start();
-                    System.out.println("S1: Server (Location): Listening on port " + flightServer.getPort());
-                    System.out.println("S1: Server (Location): Press CTRL-C to stop.");
-                    flightServer.awaitTermination();
-
-                } catch (IOException e) {
-                    System.exit(1);
-                }
-
-            }
-        } catch (InterruptedException e){
-            e.printStackTrace();
-        }
     }
 }

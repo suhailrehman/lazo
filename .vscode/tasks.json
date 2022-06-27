@@ -6,7 +6,7 @@
         {
             "label": "gradle build",
             "type": "shell",
-            "command": "./gradlew.bat build",
+            "command": "./gradlew build",
             "problemMatcher": [],
             "group": {
                 "kind": "build",

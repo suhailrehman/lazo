@@ -1,0 +1,20 @@
+{
+    "configurations": [
+        {
+            "type": "java",
+            "name": "Launch LazoProducer",
+            "request": "launch",
+            "mainClass": "lazo.arrowserver.flightrpc.LazoProducer",
+            "projectName": "lazo",
+            "vmArgs": "--add-opens=java.base/java.nio=ALL-UNNAMED"
+        },
+        {
+            "type": "java",
+            "name": "Launch CookbookRunner",
+            "request": "launch",
+            "mainClass": "lazo.arrowserver.flightrpc.CookbookRunner",
+            "projectName": "lazo",
+            "vmArgs": "--add-opens=java.base/java.nio=ALL-UNNAMED"
+        },
+    ]
+}
