@@ -34,6 +34,11 @@ dependencies {
     implementation 'org.apache.arrow:flight-core:8.0.0'
     implementation 'org.apache.arrow:flight-grpc:8.0.0'
 
+    //SLF4J Logging framework
+    implementation 'org.slf4j:slf4j-api:1.7.25'
+    implementation 'org.slf4j:slf4j-simple:1.7.25'
+
+
 }
 
 // In this section you declare where to find the dependencies of your project
