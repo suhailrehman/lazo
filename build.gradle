@@ -35,8 +35,8 @@ dependencies {
     implementation 'org.apache.arrow:flight-grpc:8.0.0'
 
     //SLF4J Logging framework
-    implementation 'org.slf4j:slf4j-api:1.7.25'
-    implementation 'org.slf4j:slf4j-simple:1.7.25'
+    implementation 'org.slf4j:slf4j-api:1.7.36'
+    implementation 'org.slf4j:slf4j-log4j12:1.7.36'
 
 
 }
@@ -49,14 +49,42 @@ repositories {
     jcenter()
 }
 
+
 jar {
     manifest {
         attributes('Implementation-Title': project.name,
-                    'Implementation-Version': project.version)
+                    'Implementation-Version': project.version,
+                    'Main-Class': 'lazo.arrowserver.flightrpc.LazoProducer')
     }
 }
 
-//task execute(type:JavaExec) {
-//   main = mainClass
-//  classpath = sourceSets.main.runtimeClasspath
-//}
+tasks.register('uberJar', Jar) {
+    archiveClassifier = 'uber'
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    manifest {
+        attributes('Implementation-Title': project.name,
+                    'Implementation-Version': project.version,
+                    'Main-Class': 'lazo.arrowserver.flightrpc.LazoProducer')
+    }
+
+    from sourceSets.main.output
+
+    dependsOn configurations.runtimeClasspath
+    from {
+        configurations.runtimeClasspath.findAll { it.name.endsWith('jar') }.collect { zipTree(it) }
+    }
+
+}
+
+// sourceSets {
+//     main {
+//         resources {
+//             srcDirs "src/main/resources"
+//         }
+//     }
+// }
+
+// task execute(type:JavaExec) {
+//     main = LazoProducer
+//     classpath = lazo.arrowserver.flightrpc
+// }
