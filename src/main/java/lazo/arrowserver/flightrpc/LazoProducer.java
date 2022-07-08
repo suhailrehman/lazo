@@ -250,6 +250,7 @@ public class LazoProducer extends NoOpFlightProducer {
             }
         } catch (InterruptedException e){
             e.printStackTrace();
+            logger.info("S1: Server (Location): Exiting...");
         }
     }
 }
