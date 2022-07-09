@@ -320,6 +320,7 @@ public class LazoProducer extends NoOpFlightProducer {
                     flightServer.awaitTermination();
 
                 } catch (IOException e) {
+                    logger.error("S1: Server (Location): Could not start server.");
                     System.exit(1);
                 }
 
