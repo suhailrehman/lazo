@@ -1,10 +1,12 @@
 package lazo.sketch;
 
+import java.io.Serializable;
+
 import com.clearspring.analytics.stream.cardinality.CardinalityMergeException;
 import com.clearspring.analytics.stream.cardinality.HyperLogLogPlus;
 import com.clearspring.analytics.stream.cardinality.ICardinality;
 
-public class LazoSketch implements Sketch {
+public class LazoSketch implements Sketch, Serializable {
 
     private int k;
     private SketchType sketchType;

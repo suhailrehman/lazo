@@ -1,14 +1,16 @@
 package lazo.arrowserver.flightrpc;
 
+import java.io.Serializable;
 import java.util.Collection;
 import java.util.concurrent.ConcurrentHashMap;
+
 import org.apache.arrow.vector.types.pojo.Schema;
 import lazo.sketch.LazoSketch;
 
 
-class SketchSet {
-    private final ConcurrentHashMap<String,LazoSketch> sketch;
-    private final Schema schema;
+class SketchSet implements Serializable{
+    private transient ConcurrentHashMap<String,LazoSketch> sketch;
+    private transient Schema schema;
 
     public SketchSet(Schema schema) {
         this.sketch = new ConcurrentHashMap<>();
@@ -29,5 +31,16 @@ class SketchSet {
 
     public Schema getSchema() {
         return schema;
+    }
+
+    private void writeObject (java.io.ObjectOutputStream out) throws java.io.IOException {
+        out.writeObject(sketch);
+        out.writeObject(schema.toJson());
+    }
+
+    @SuppressWarnings("unchecked")
+    private void readObject (java.io.ObjectInputStream in) throws java.io.IOException, ClassNotFoundException {
+        sketch = (ConcurrentHashMap<String, LazoSketch>) in.readObject();
+        schema = Schema.fromJSON((String) in.readObject());
     }
 }

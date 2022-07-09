@@ -32,3 +32,8 @@ bin/*
 bin/
 build/*
 build/
+
+# Serializastion and log files
+*.ser
+*.log
+*.log*

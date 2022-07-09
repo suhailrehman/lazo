@@ -1,5 +1,6 @@
 package lazo.sketch;
 
+import java.io.Serializable;
 import java.nio.charset.Charset;
 import java.util.Random;
 import java.util.stream.LongStream;
@@ -7,7 +8,7 @@ import java.util.stream.LongStream;
 import com.google.common.hash.HashCode;
 import com.google.common.hash.HashFunction;
 
-public class MinHash implements Sketch {
+public class MinHash implements Sketch, Serializable {
 
     private final long mersennePrime = (1 << 61) - 1;
 

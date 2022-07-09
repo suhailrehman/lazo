@@ -1,9 +1,15 @@
 package lazo.arrowserver.flightrpc;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -24,6 +30,7 @@ import org.apache.arrow.flight.NoOpFlightProducer;
 import org.apache.arrow.flight.PutResult;
 import org.apache.arrow.flight.Result;
 import org.apache.arrow.flight.Ticket;
+import org.apache.arrow.flight.impl.Flight;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.BigIntVector;
@@ -50,7 +57,7 @@ import org.slf4j.LoggerFactory;
 public class LazoProducer extends NoOpFlightProducer {
     private final BufferAllocator allocator;
     private final Location location;
-    private final ConcurrentHashMap<FlightDescriptor, SketchSet> hashes;
+    private ConcurrentHashMap<String, SketchSet> hashes;
     private final LazoIndex index;
     private static final Logger logger = LoggerFactory.getLogger(LazoProducer.class); // equiv to  LogManager.getLogger(MyTest.class);
     private float jcx_threshold;
@@ -62,6 +69,14 @@ public class LazoProducer extends NoOpFlightProducer {
         this.hashes = new ConcurrentHashMap<>();
         this.index = new LazoIndex();
         this.jcx_threshold = 0.5f;
+    }
+
+    private String descriptorToString(FlightDescriptor fd){
+        StringBuilder sb = new StringBuilder();
+        for (String pathComponent: fd.getPath()){
+            sb.append(pathComponent);
+        }
+        return sb.toString();
     }
 
     // generate a hash
@@ -105,9 +120,13 @@ public class LazoProducer extends NoOpFlightProducer {
                 
             }
 
-            hashes.put(flightStream.getDescriptor(), sketchSet);
+            hashes.put(descriptorToString(flightStream.getDescriptor()), sketchSet);
             
             logger.debug("S1: Server: Sketched "+ rows +" rows for Table: "+flightStream.getDescriptor());
+            
+            if (this.hashes.size() % 1000 == 0){
+                logger.info("S1: Server: Sketched "+ this.hashes.size() +" column sets");
+            }
             ackStream.onCompleted();
 
         };
@@ -118,7 +137,7 @@ public class LazoProducer extends NoOpFlightProducer {
 
         FlightDescriptor flightDescriptor = FlightDescriptor.path(
                 new String(ticket.getBytes(), StandardCharsets.UTF_8));
-        SketchSet sketchSet = this.hashes.get(flightDescriptor);
+        SketchSet sketchSet = this.hashes.get(descriptorToString(flightDescriptor));
         if (sketchSet == null) {
             throw CallStatus.NOT_FOUND.withDescription("Unknown descriptor").toRuntimeException();
         } else {
@@ -164,11 +183,12 @@ public class LazoProducer extends NoOpFlightProducer {
     }
 
     @Override
+    @SuppressWarnings("unchecked")
     public void doAction(CallContext context, Action action, StreamListener<Result> listener) {
         logger.debug("S1 Server: doAction called: Type:"+action.getType());
         FlightDescriptor flightDescriptor = FlightDescriptor.path(
                 new String(action.getBody(), StandardCharsets.UTF_8));
-        SketchSet sketchSet = hashes.get(flightDescriptor);
+        SketchSet sketchSet = hashes.get(descriptorToString(flightDescriptor));
         
         switch (action.getType()) {
             case "INDEX":
@@ -176,11 +196,33 @@ public class LazoProducer extends NoOpFlightProducer {
                 for (Field field: sketchSet.getSchema().getFields()){
                     String fieldName = field.getName();
                     String indexKey = fieldName;
-                    index.update(indexKey, sketchSet.getSketch(fieldName));
+                    index.insert(indexKey, sketchSet.getSketch(fieldName));
                     logger.debug("S1 Server: Indexed: "+fieldName);
                 }
                 Result indexResult = new Result("Added to Index".getBytes(StandardCharsets.UTF_8));
                 listener.onNext(indexResult);
+                listener.onCompleted();
+                break;
+
+            case "INDEXALL":
+                logger.debug("S1 Server: doAction Indexing All: "+flightDescriptor.getPath()); 
+                for (SketchSet skSet: hashes.values()){   
+                    logger.debug("Indexing"+skSet.toString());
+                    for (Field field: skSet.getSchema().getFields()){
+                        try{
+                            String fieldName = field.getName();
+                            String indexKey = fieldName;
+                            logger.debug(fieldName+" loaded");
+                            logger.debug("Sketch contents: "+ Arrays.toString(skSet.getSketch(fieldName).getHashValues()));
+                            index.insert(indexKey, skSet.getSketch(fieldName));
+                //          logger.debug("S1 Server: Indexed: "+fieldName);
+                        } catch (Exception e){
+                            logger.error(e.getMessage());
+                        }
+                    }
+                }
+                Result indexAllResult = new Result("Added all Sketches to Index".getBytes(StandardCharsets.UTF_8));
+                listener.onNext(indexAllResult);
                 listener.onCompleted();
                 break;
 
@@ -195,7 +237,7 @@ public class LazoProducer extends NoOpFlightProducer {
 
             case "QUERY":
                 logger.debug("S1 Server: doAction Querying: "+flightDescriptor.getPath());
-                sketchSet = hashes.get(flightDescriptor);
+                sketchSet = hashes.get(descriptorToString(flightDescriptor));
                 
                 StringJoiner sb = new StringJoiner("\n");
 
@@ -210,6 +252,40 @@ public class LazoProducer extends NoOpFlightProducer {
                 listener.onNext(queryResult); 
                 listener.onCompleted();
                 break;
+
+            case "SERIALIZE":
+                logger.info("S1 Server: Serializing Existing SketchSet to file: "+flightDescriptor.getPath());
+                try{
+                    ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(new File(flightDescriptor.getPath().toString())));
+                    out.writeObject(this.hashes);
+                    out.close();
+                }
+                catch (IOException e){
+                    logger.error("Unable to serialize SketchSet to file: "+flightDescriptor.getPath());
+                    e.printStackTrace();
+                }
+
+                Result serializeResult = new Result("Serialized to File: ".getBytes(StandardCharsets.UTF_8));
+                listener.onNext(serializeResult); 
+                listener.onCompleted();
+                break;
+
+            case "LOAD":
+                logger.info("S1 Server: Loading SketchSet from file: "+flightDescriptor.getPath());
+                try{
+                    ObjectInputStream in = new ObjectInputStream(new FileInputStream(new File(flightDescriptor.getPath().toString())));
+                    this.hashes = (ConcurrentHashMap<String,SketchSet>) in.readObject();
+                    logger.info(String.format("S1 Server: Loaded %d SketchSets from file.", this.hashes.size()));
+                }
+                catch (IOException | ClassNotFoundException e){
+                    logger.error("Unable to serialize SketchSet to file: "+flightDescriptor.getPath());
+                    e.printStackTrace();
+                }
+
+                Result loadResult = new Result("Serialized to File: ".getBytes(StandardCharsets.UTF_8));
+                listener.onNext(loadResult); 
+                listener.onCompleted();
+                break;
         }
     }
 
@@ -218,7 +294,7 @@ public class LazoProducer extends NoOpFlightProducer {
         FlightEndpoint flightEndpoint = new FlightEndpoint(
                 new Ticket(descriptor.getPath().get(0).getBytes(StandardCharsets.UTF_8)), location);
         return new FlightInfo(
-                hashes.get(descriptor).getSchema(),
+                hashes.get(descriptorToString(descriptor)).getSchema(),
                 descriptor,
                 Collections.singletonList(flightEndpoint),
                 /*bytes=*/-1, 0
@@ -227,7 +303,7 @@ public class LazoProducer extends NoOpFlightProducer {
 
     @Override
     public void listFlights(CallContext context, Criteria criteria, StreamListener<FlightInfo> listener) {
-        hashes.forEach((k, v) -> { listener.onNext(getFlightInfo(null, k)); });
+        hashes.forEach((k, v) -> { listener.onNext(getFlightInfo(null, FlightDescriptor.path(k))); });
         listener.onCompleted();
     }
 
