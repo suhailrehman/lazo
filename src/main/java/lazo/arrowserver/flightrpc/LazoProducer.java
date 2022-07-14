@@ -227,7 +227,7 @@ public class LazoProducer extends NoOpFlightProducer {
                 break;
 
             case "THRESHOLD":
-                logger.debug("S1 Server: doAction Threshold: "+flightDescriptor.getPath());    
+                logger.info("S1 Server: doAction Threshold: "+flightDescriptor.getPath());    
                 String threshold = new String(action.getBody(), StandardCharsets.UTF_8);
                 jcx_threshold = Float.parseFloat(threshold);
                 Result thresholdResult = new Result(String.format("Threshold set to: %f",jcx_threshold).getBytes(StandardCharsets.UTF_8));
