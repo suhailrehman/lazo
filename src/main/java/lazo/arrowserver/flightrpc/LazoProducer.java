@@ -256,7 +256,7 @@ public class LazoProducer extends NoOpFlightProducer {
             case "SERIALIZE":
                 logger.info("S1 Server: Serializing Existing SketchSet to file: "+flightDescriptor.getPath());
                 try{
-                    ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(new File(flightDescriptor.getPath().toString())));
+                    ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(new File(descriptorToString(flightDescriptor))));
                     out.writeObject(this.hashes);
                     out.close();
                 }
@@ -273,7 +273,7 @@ public class LazoProducer extends NoOpFlightProducer {
             case "LOAD":
                 logger.info("S1 Server: Loading SketchSet from file: "+flightDescriptor.getPath());
                 try{
-                    ObjectInputStream in = new ObjectInputStream(new FileInputStream(new File(flightDescriptor.getPath().toString())));
+                    ObjectInputStream in = new ObjectInputStream(new FileInputStream(new File(descriptorToString(flightDescriptor))));
                     this.hashes = (ConcurrentHashMap<String,SketchSet>) in.readObject();
                     logger.info(String.format("S1 Server: Loaded %d SketchSets from file.", this.hashes.size()));
                 }

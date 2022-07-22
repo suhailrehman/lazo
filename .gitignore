@@ -37,3 +37,4 @@ build/
 *.ser
 *.log
 *.log*
+[sketchset.ser]
