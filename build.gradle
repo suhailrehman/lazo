@@ -8,6 +8,8 @@
 
 plugins {
     // Apply the java-library plugin to add support for Java Library
+    id 'java'
+    id 'com.github.johnrengelman.shadow' version '7.1.2'
     id 'java-library'
     id 'eclipse'
 }
@@ -46,7 +48,11 @@ repositories {
     // Use jcenter for resolving your dependencies.
     // You can declare any Maven/Ivy/file repository here.
     mavenCentral()
-    jcenter()
+    //jcenter()
+}
+
+shadowJar {
+    //archiveBaseName.set('lazo-0.1.0-uber.jar')
 }
 
 
@@ -58,23 +64,23 @@ jar {
     }
 }
 
-tasks.register('uberJar', Jar) {
-    archiveClassifier = 'uber'
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-    manifest {
-        attributes('Implementation-Title': project.name,
-                    'Implementation-Version': project.version,
-                    'Main-Class': 'lazo.arrowserver.flightrpc.LazoProducer')
-    }
+// tasks.register('uberJar', Jar) {
+//     archiveClassifier = 'uber'
+//     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+//     manifest {
+//         attributes('Implementation-Title': project.name,
+//                     'Implementation-Version': project.version,
+//                     'Main-Class': 'lazo.arrowserver.flightrpc.LazoProducer')
+//     }
 
-    from sourceSets.main.output
+//     from sourceSets.main.output
 
-    dependsOn configurations.runtimeClasspath
-    from {
-        configurations.runtimeClasspath.findAll { it.name.endsWith('jar') }.collect { zipTree(it) }
-    }
+//     dependsOn configurations.runtimeClasspath
+//     from {
+//         configurations.runtimeClasspath.findAll { it.name.endsWith('jar') }.collect { zipTree(it) }
+//     }
 
-}
+// }
 
 // sourceSets {
 //     main {
