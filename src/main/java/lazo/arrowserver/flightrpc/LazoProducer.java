@@ -90,10 +90,12 @@ public class LazoProducer extends NoOpFlightProducer {
         // FlightDescriptor fDescriptor = flightStream.getDescriptor();
         
         // Get the schema from the descriptor
+        String DataframeLabel = descriptorToString(flightStream.getDescriptor());
         Schema schema = flightStream.getSchema();
         List<Field> fields = schema.getFields();
 
-        logger.info("Storing: "+ descriptorToString(flightStream.getDescriptor()));
+
+        logger.info("Storing: "+ DataframeLabel);
         logger.debug("Computing Lazo Sketch for Schema: " + schema.toString());
         logger.debug("Fields: " + fields.toString());
 
@@ -116,13 +118,15 @@ public class LazoProducer extends NoOpFlightProducer {
 
                         for (int i=0; i < root.getRowCount(); i++){
                             String fieldContents = fieldVector.getObject(i).toString();
+                            //logger.debug("Field: " + feildName + " Value: " + fieldContents);
                             uniqueValueHashSet.add(fieldContents);
                         }
                         
+                        logger.debug("# Unique values for field: " + feildName + ": " + uniqueValueHashSet.size());
                         uniqueValues.put(feildName, uniqueValueHashSet);
                     }
                     
-                    rows += flightStream.getRoot().getRowCount();
+                    rows += root.getRowCount();
                 }
                 catch (Exception e){
                     logger.error("Error while processing stream: " + e.getMessage());
@@ -141,12 +145,12 @@ public class LazoProducer extends NoOpFlightProducer {
                 sketchSet.setSketch(feildName, fieldSketch);
             }
 
-            hashes.put(descriptorToString(flightStream.getDescriptor()), sketchSet);
+            hashes.put(DataframeLabel, sketchSet);
             
-            logger.debug("S1: Server: Sketched "+ rows +" rows for Table: "+flightStream.getDescriptor());
+            logger.debug("S1: Server: Sketched "+ rows +" rows for Table: "+DataframeLabel);
             
             if (this.hashes.size() % 1000 == 0){
-                logger.info("S1: Server: Sketched "+ this.hashes.size() +" column sets");
+                logger.info("S1: Server: Sketched "+ this.uniqueValues.size() +" column sets");
             }
             ackStream.onCompleted();
 
@@ -236,7 +240,7 @@ public class LazoProducer extends NoOpFlightProducer {
                             String fieldName = field.getName();
                             String indexKey = fieldName;
                             logger.debug(fieldName+" loaded");
-                            logger.debug("Sketch contents: "+ Arrays.toString(skSet.getSketch(fieldName).getHashValues()));
+                            logger.trace("Sketch contents: "+ Arrays.toString(skSet.getSketch(fieldName).getHashValues()));
                             index.insert(indexKey, skSet.getSketch(fieldName));
                             num_indexed++;
                 //          logger.debug("S1 Server: Indexed: "+fieldName);
