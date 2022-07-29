@@ -58,7 +58,9 @@ public class LazoProducer extends NoOpFlightProducer {
     private final BufferAllocator allocator;
     private final Location location;
     private ConcurrentHashMap<String, SketchSet> hashes;
-    private final LazoIndex index;
+    private ConcurrentHashMap<String, HashSet<String>> uniqueValues;
+    private ConcurrentHashMap<String, LazoSketch> sketchValues;
+    private LazoIndex index;
     private static final Logger logger = LoggerFactory.getLogger(LazoProducer.class); // equiv to  LogManager.getLogger(MyTest.class);
     private float jcx_threshold;
 
@@ -67,8 +69,10 @@ public class LazoProducer extends NoOpFlightProducer {
         this.allocator = allocator;
         this.location = location;
         this.hashes = new ConcurrentHashMap<>();
+        this.uniqueValues = new ConcurrentHashMap<>();
+        this.sketchValues = new ConcurrentHashMap<>();
         this.index = new LazoIndex();
-        this.jcx_threshold = 0.5f;
+        this.jcx_threshold = 0.1f;
     }
 
     private String descriptorToString(FlightDescriptor fd){
@@ -89,6 +93,7 @@ public class LazoProducer extends NoOpFlightProducer {
         Schema schema = flightStream.getSchema();
         List<Field> fields = schema.getFields();
 
+        logger.info("Storing: "+ descriptorToString(flightStream.getDescriptor()));
         logger.debug("Computing Lazo Sketch for Schema: " + schema.toString());
         logger.debug("Fields: " + fields.toString());
 
@@ -104,20 +109,36 @@ public class LazoProducer extends NoOpFlightProducer {
                 // Unload the vector into a list of ArrowRecordBatch
                 try (final ArrowRecordBatch arb = unloader.getRecordBatch()) {
                     for (FieldVector fieldVector : root.getFieldVectors()) {
-                        LazoSketch fieldSketch = new LazoSketch();
-                        HashSet<String> uniqueValues = new HashSet<String>();
+                        String feildName = fieldVector.getField().getName();
+                        // LazoSketch fieldSketch = new LazoSketch();
+                        // HashSet<String> uniqueValues = new HashSet<String>();
+                        HashSet<String> uniqueValueHashSet = uniqueValues.contains(feildName) ? uniqueValues.get(feildName) : new HashSet<String>();
+
                         for (int i=0; i < root.getRowCount(); i++){
                             String fieldContents = fieldVector.getObject(i).toString();
-                            if (uniqueValues.add(fieldContents)) {
-                                fieldSketch.update(fieldContents);
-                            }
+                            uniqueValueHashSet.add(fieldContents);
                         }
-                        sketchSet.setSketch(fieldVector.getField().getName(), fieldSketch);
+                        
+                        uniqueValues.put(feildName, uniqueValueHashSet);
                     }
                     
                     rows += flightStream.getRoot().getRowCount();
                 }
+                catch (Exception e){
+                    logger.error("Error while processing stream: " + e.getMessage());
+                }
                 
+            }
+
+            // Add the sketch to the sketch set
+            for (Field field : schema.getFields()) {
+                String feildName = field.getName();
+                LazoSketch fieldSketch = sketchValues.contains(feildName) ? sketchValues.get(feildName) : new LazoSketch();
+                for (String uniqueValue : uniqueValues.get(feildName)) {
+                    fieldSketch.update(uniqueValue);
+                }
+                sketchValues.put(feildName, fieldSketch);
+                sketchSet.setSketch(feildName, fieldSketch);
             }
 
             hashes.put(descriptorToString(flightStream.getDescriptor()), sketchSet);
@@ -205,7 +226,9 @@ public class LazoProducer extends NoOpFlightProducer {
                 break;
 
             case "INDEXALL":
-                logger.debug("S1 Server: doAction Indexing All: "+flightDescriptor.getPath()); 
+                logger.info("S1 Server: doAction Indexing All: "+flightDescriptor.getPath()); 
+                index = new LazoIndex();
+                int num_indexed = 0;
                 for (SketchSet skSet: hashes.values()){   
                     logger.debug("Indexing"+skSet.toString());
                     for (Field field: skSet.getSchema().getFields()){
@@ -215,12 +238,14 @@ public class LazoProducer extends NoOpFlightProducer {
                             logger.debug(fieldName+" loaded");
                             logger.debug("Sketch contents: "+ Arrays.toString(skSet.getSketch(fieldName).getHashValues()));
                             index.insert(indexKey, skSet.getSketch(fieldName));
+                            num_indexed++;
                 //          logger.debug("S1 Server: Indexed: "+fieldName);
                         } catch (Exception e){
                             logger.error(e.getMessage());
                         }
                     }
                 }
+                logger.info("S1 Server: Indexed "+num_indexed+" columns");
                 Result indexAllResult = new Result("Added all Sketches to Index".getBytes(StandardCharsets.UTF_8));
                 listener.onNext(indexAllResult);
                 listener.onCompleted();
@@ -236,12 +261,13 @@ public class LazoProducer extends NoOpFlightProducer {
                 break;
 
             case "QUERY":
-                logger.debug("S1 Server: doAction Querying: "+flightDescriptor.getPath());
+                logger.info("S1 Server: doAction Querying: "+flightDescriptor.getPath()+" with threshold: "+jcx_threshold);
                 sketchSet = hashes.get(descriptorToString(flightDescriptor));
                 
                 StringJoiner sb = new StringJoiner("\n");
 
                 for (LazoSketch lazoSketch: sketchSet.getAllSketches()){
+                    logger.info("Query Sketch: " + lazoSketch.toString());
                     Set<LazoCandidate> indexesResult = index.queryContainment(lazoSketch, jcx_threshold);
                     for (LazoCandidate lc: indexesResult){
                         sb.add(lc.key.toString());
