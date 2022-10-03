@@ -15,7 +15,7 @@
 	    <param name="append" value="false" />
 	    <param name="maxFileSize" value="10MB" />
 	    <param name="maxBackupIndex" value="10" />
-		<param name="Threshold" value="DEBUG" />
+		<param name="Threshold" value="INFO" />
 	    <param name="file" value="LazoArrowServer.log" />
 	    <layout class="org.apache.log4j.PatternLayout">
 		<param name="ConversionPattern" 
